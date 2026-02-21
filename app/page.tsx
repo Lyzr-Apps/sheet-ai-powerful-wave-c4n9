@@ -12,49 +12,42 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   FiHome, FiGrid, FiSettings, FiPlay, FiRefreshCw,
   FiCheck, FiX, FiAlertTriangle, FiHelpCircle, FiSend,
-  FiEye, FiEyeOff, FiDatabase, FiClock, FiActivity,
+  FiEye, FiEyeOff, FiClock, FiActivity,
   FiChevronDown, FiChevronUp, FiLoader, FiArrowRight,
-  FiZap, FiTable, FiFileText, FiLink
+  FiZap, FiTable, FiFileText, FiLink, FiType, FiList,
+  FiTrash2, FiCopy
 } from 'react-icons/fi'
+import { copyToClipboard } from '@/lib/clipboard'
 
 // --- Constants ---
 const ROW_AGENT_ID = '699936cd02de7ae3dd4c1a80'
 const ADVISOR_AGENT_ID = '699936cdcfb4f05aa49ea783'
 
-const MOCK_COLUMNS = ['ID', 'Customer Name', 'Feedback', 'Date', 'Rating', 'Output', 'Status']
-
-const INITIAL_MOCK_DATA: string[][] = [
-  ['1', 'Alice Johnson', 'Great product, fast shipping', '2024-01-15', '5', '', ''],
-  ['2', 'Bob Smith', 'Item arrived damaged, poor packaging', '2024-01-16', '2', '', ''],
-  ['3', 'Carol White', 'Average quality, nothing special', '2024-01-17', '3', '', ''],
-  ['4', 'David Brown', 'Excellent customer service response', '2024-01-18', '5', '', ''],
-  ['5', 'Eva Martinez', 'Product does not match description', '2024-01-19', '1', '', ''],
-  ['6', 'Frank Lee', 'Good value for money, will buy again', '2024-01-20', '4', '', ''],
-  ['7', 'Grace Kim', 'Took too long to arrive', '2024-01-21', '2', '', ''],
-  ['8', 'Henry Wilson', 'Perfect, exactly what I needed', '2024-01-22', '5', '', ''],
-  ['9', 'Iris Chen', 'Decent but overpriced for quality', '2024-01-23', '3', '', ''],
-  ['10', 'Jack Davis', 'Fantastic experience overall', '2024-01-24', '5', '', ''],
-]
-
 const SAMPLE_ACTIVITY_LOG = [
-  { id: '1', timestamp: '2024-01-24 14:32', rows: 10, success: 8, failed: 2, instruction: 'Classify sentiment as positive/negative/neutral' },
-  { id: '2', timestamp: '2024-01-23 09:15', rows: 5, success: 5, failed: 0, instruction: 'Summarize feedback in one sentence' },
-  { id: '3', timestamp: '2024-01-22 16:45', rows: 8, success: 7, failed: 1, instruction: 'Extract key complaints' },
+  { id: '1', timestamp: '2024-01-24 14:32', lines: 10, success: 8, failed: 2, instruction: 'Classify sentiment as positive/negative/neutral' },
+  { id: '2', timestamp: '2024-01-23 09:15', lines: 5, success: 5, failed: 0, instruction: 'Summarize each item in one sentence' },
+  { id: '3', timestamp: '2024-01-22 16:45', lines: 8, success: 7, failed: 1, instruction: 'Translate to formal English' },
 ]
 
 // --- Interfaces ---
 interface ProcessingState {
   isRunning: boolean
-  currentRow: number
-  totalRows: number
+  currentLine: number
+  totalLines: number
   successCount: number
   failCount: number
   retryCount: number
   completed: boolean
+}
+
+interface LineResult {
+  lineNumber: number
+  input: string
+  output: string
+  status: 'pending' | 'processing' | 'success' | 'error'
 }
 
 interface ChatMessage {
@@ -67,7 +60,7 @@ interface ChatMessage {
 interface ActivityEntry {
   id: string
   timestamp: string
-  rows: number
+  lines: number
   success: number
   failed: number
   instruction: string
@@ -160,11 +153,11 @@ function Sidebar({ activeScreen, setActiveScreen }: { activeScreen: string; setA
       <div className="p-6 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-            <FiTable className="w-5 h-5 text-primary" />
+            <FiType className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-foreground tracking-tight">SpreadSheet AI</h1>
-            <p className="text-xs text-muted-foreground">Batch Processing</p>
+            <h1 className="text-lg font-bold text-foreground tracking-tight">Text Processor</h1>
+            <p className="text-xs text-muted-foreground">AI Batch Processing</p>
           </div>
         </div>
       </div>
@@ -198,59 +191,50 @@ function Sidebar({ activeScreen, setActiveScreen }: { activeScreen: string; setA
 function DashboardScreen({
   showSample,
   activityLog,
+  lastRun,
   setActiveScreen,
 }: {
   showSample: boolean
   activityLog: ActivityEntry[]
+  lastRun: { lines: number; success: number; failed: number; timestamp: string } | null
   setActiveScreen: (s: string) => void
 }) {
   const displayLog = showSample ? SAMPLE_ACTIVITY_LOG : activityLog
+  const displayRun = showSample
+    ? { lines: 10, success: 8, failed: 2, timestamp: 'Jan 24, 2024 at 14:32' }
+    : lastRun
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Dashboard</h2>
-        <p className="text-sm text-muted-foreground mt-1">Overview of your spreadsheet processing</p>
+        <p className="text-sm text-muted-foreground mt-1">Overview of your text processing activity</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Sheet Info Card */}
+        {/* How It Works */}
         <Card className="bg-card border-border shadow-xl shadow-primary/5">
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
-              <FiDatabase className="w-4 h-4 text-primary" />
-              <CardTitle className="text-base">Sheet Metadata</CardTitle>
+              <FiFileText className="w-4 h-4 text-primary" />
+              <CardTitle className="text-base">How It Works</CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {showSample ? (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Sheet Name</p>
-                    <p className="text-sm font-medium text-foreground">Customer Feedback Q1</p>
+          <CardContent className="space-y-3">
+            <div className="space-y-3">
+              {[
+                { step: '1', text: 'Paste your text -- each line is a separate item' },
+                { step: '2', text: 'Write a processing instruction (applied to every line)' },
+                { step: '3', text: 'Click Run -- AI processes each line independently' },
+              ].map((item) => (
+                <div key={item.step} className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <span className="text-xs font-bold text-primary">{item.step}</span>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Total Rows</p>
-                    <p className="text-sm font-medium text-foreground">10</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Total Columns</p>
-                    <p className="text-sm font-medium text-foreground">7</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Last Modified</p>
-                    <p className="text-sm font-medium text-foreground">Jan 24, 2024</p>
-                  </div>
+                  <p className="text-sm text-foreground">{item.text}</p>
                 </div>
-              </>
-            ) : (
-              <div className="text-center py-6 text-muted-foreground">
-                <FiDatabase className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p className="text-sm">No sheet loaded yet</p>
-                <p className="text-xs mt-1">Go to Processing to work with data</p>
-              </div>
-            )}
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -263,29 +247,31 @@ function DashboardScreen({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {showSample ? (
+            {displayRun ? (
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Rows Processed</p>
-                    <p className="text-2xl font-bold text-foreground">10</p>
+                    <p className="text-xs text-muted-foreground">Lines Processed</p>
+                    <p className="text-2xl font-bold text-foreground">{displayRun.lines}</p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Success Rate</p>
-                    <p className="text-2xl font-bold" style={{ color: 'hsl(135, 94%, 60%)' }}>80%</p>
+                    <p className="text-2xl font-bold" style={{ color: 'hsl(135, 94%, 60%)' }}>
+                      {displayRun.lines > 0 ? Math.round((displayRun.success / displayRun.lines) * 100) : 0}%
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Successful</p>
-                    <Badge variant="outline" className="border-green-500/30 text-green-400">8 passed</Badge>
+                    <Badge variant="outline" className="border-green-500/30 text-green-400">{displayRun.success} passed</Badge>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Failed</p>
-                    <Badge variant="outline" className="border-red-500/30 text-red-400">2 failed</Badge>
+                    <Badge variant="outline" className="border-red-500/30 text-red-400">{displayRun.failed} failed</Badge>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border">
                   <FiClock className="w-3 h-3" />
-                  <span>Jan 24, 2024 at 14:32</span>
+                  <span>{displayRun.timestamp}</span>
                 </div>
               </>
             ) : (
@@ -307,7 +293,7 @@ function DashboardScreen({
               <FiClock className="w-4 h-4 text-primary" />
               <CardTitle className="text-base">Recent Activity</CardTitle>
             </div>
-            {(displayLog.length > 0) && (
+            {displayLog.length > 0 && (
               <Badge variant="secondary" className="text-xs">{displayLog.length} runs</Badge>
             )}
           </div>
@@ -324,7 +310,7 @@ function DashboardScreen({
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <FiClock className="w-3 h-3" /> {entry.timestamp}
                         </span>
-                        <span className="text-xs text-muted-foreground">{entry.rows} rows</span>
+                        <span className="text-xs text-muted-foreground">{entry.lines} lines</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 ml-4">
@@ -358,8 +344,6 @@ function DashboardScreen({
 
 // --- Processing Screen ---
 function ProcessingScreen({
-  spreadsheetData,
-  setSpreadsheetData,
   processingState,
   setProcessingState,
   activityLog,
@@ -367,9 +351,8 @@ function ProcessingScreen({
   showSample,
   activeAgentId,
   setActiveAgentId,
+  setLastRun,
 }: {
-  spreadsheetData: string[][]
-  setSpreadsheetData: React.Dispatch<React.SetStateAction<string[][]>>
   processingState: ProcessingState
   setProcessingState: React.Dispatch<React.SetStateAction<ProcessingState>>
   activityLog: ActivityEntry[]
@@ -377,48 +360,86 @@ function ProcessingScreen({
   showSample: boolean
   activeAgentId: string | null
   setActiveAgentId: React.Dispatch<React.SetStateAction<string | null>>
+  setLastRun: React.Dispatch<React.SetStateAction<{ lines: number; success: number; failed: number; timestamp: string } | null>>
 }) {
-  const [fromRow, setFromRow] = useState('1')
-  const [toRow, setToRow] = useState('10')
-  const [outputColumn, setOutputColumn] = useState('Output')
   const [instruction, setInstruction] = useState('')
+  const [inputText, setInputText] = useState('')
+  const [results, setResults] = useState<LineResult[]>([])
   const [statusMessage, setStatusMessage] = useState('')
   const [statusType, setStatusType] = useState<'success' | 'error' | 'info' | ''>('')
   const abortRef = useRef(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
 
+  // Parse lines from input text
+  const parsedLines = inputText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  // Load sample data
   useEffect(() => {
     if (showSample) {
-      setInstruction('Classify the customer feedback sentiment as positive, negative, or neutral')
+      setInstruction('Classify the sentiment as positive, negative, or neutral')
+      setInputText(
+        'Great product, fast shipping\nItem arrived damaged, poor packaging\nAverage quality, nothing special\nExcellent customer service response\nProduct does not match description'
+      )
+      setResults([
+        { lineNumber: 1, input: 'Great product, fast shipping', output: 'Positive - customer expresses satisfaction with both product quality and delivery speed', status: 'success' },
+        { lineNumber: 2, input: 'Item arrived damaged, poor packaging', output: 'Negative - customer reports damage and criticizes packaging quality', status: 'success' },
+        { lineNumber: 3, input: 'Average quality, nothing special', output: 'Neutral - customer finds the product unremarkable without strong feelings', status: 'success' },
+        { lineNumber: 4, input: 'Excellent customer service response', output: 'Positive - customer appreciates the support team interaction', status: 'success' },
+        { lineNumber: 5, input: 'Product does not match description', output: 'Error: rate limit exceeded', status: 'error' },
+      ])
+      setProcessingState({
+        isRunning: false,
+        currentLine: 5,
+        totalLines: 5,
+        successCount: 4,
+        failCount: 1,
+        retryCount: 1,
+        completed: true,
+      })
+    } else {
+      setResults([])
+      setProcessingState({
+        isRunning: false,
+        currentLine: 0,
+        totalLines: 0,
+        successCount: 0,
+        failCount: 0,
+        retryCount: 0,
+        completed: false,
+      })
     }
-  }, [showSample])
+  }, [showSample, setProcessingState])
 
   const handleRunProcessing = useCallback(async () => {
-    const start = parseInt(fromRow, 10)
-    const end = parseInt(toRow, 10)
-    if (isNaN(start) || isNaN(end) || start < 1 || end > spreadsheetData.length || start > end) {
-      setStatusMessage('Invalid row range. Please check From and To values.')
-      setStatusType('error')
-      return
-    }
     if (!instruction.trim()) {
       setStatusMessage('Please enter a processing instruction.')
       setStatusType('error')
       return
     }
-    if (!outputColumn) {
-      setStatusMessage('Please select an output column.')
+    if (parsedLines.length === 0) {
+      setStatusMessage('Please enter at least one line of text to process.')
       setStatusType('error')
       return
     }
 
-    const outputColIdx = MOCK_COLUMNS.indexOf(outputColumn)
-    const statusColIdx = MOCK_COLUMNS.indexOf('Status')
-    const totalRows = end - start + 1
+    const totalLines = parsedLines.length
+
+    // Initialize results as pending
+    const initialResults: LineResult[] = parsedLines.map((line, idx) => ({
+      lineNumber: idx + 1,
+      input: line,
+      output: '',
+      status: 'pending' as const,
+    }))
+    setResults(initialResults)
 
     setProcessingState({
       isRunning: true,
-      currentRow: 0,
-      totalRows,
+      currentLine: 0,
+      totalLines,
       successCount: 0,
       failCount: 0,
       retryCount: 0,
@@ -432,14 +453,17 @@ function ProcessingScreen({
     let failCount = 0
     let retryTotal = 0
 
-    for (let i = start - 1; i < end; i++) {
+    for (let i = 0; i < totalLines; i++) {
       if (abortRef.current) break
 
-      const row = spreadsheetData[i]
-      if (!row) continue
+      const lineText = parsedLines[i]
 
-      const rowDataFormatted = MOCK_COLUMNS.map((col, idx) => `${col}: ${row[idx] ?? ''}`).join('\n')
-      const message = `Instruction: ${instruction}\n\nRow Data:\n${rowDataFormatted}`
+      // Mark current line as processing
+      setResults(prev => prev.map((r, idx) =>
+        idx === i ? { ...r, status: 'processing' as const } : r
+      ))
+
+      const message = `Instruction: ${instruction}\n\nText to process:\n${lineText}`
 
       let attempts = 0
       let succeeded = false
@@ -465,45 +489,30 @@ function ProcessingScreen({
           if (result?.success && agentStatus !== 'error') {
             succeeded = true
             successCount++
-            setSpreadsheetData(prev => {
-              const updated = prev.map(r => [...r])
-              if (updated[i]) {
-                updated[i][outputColIdx] = outputText || 'Processed'
-                updated[i][statusColIdx] = 'success'
-              }
-              return updated
-            })
+            setResults(prev => prev.map((r, idx) =>
+              idx === i ? { ...r, output: outputText || 'Processed', status: 'success' as const } : r
+            ))
           } else {
             if (attempts >= maxAttempts) {
               failCount++
-              setSpreadsheetData(prev => {
-                const updated = prev.map(r => [...r])
-                if (updated[i]) {
-                  updated[i][outputColIdx] = errorMsg || result?.error || 'Failed'
-                  updated[i][statusColIdx] = 'error'
-                }
-                return updated
-              })
+              setResults(prev => prev.map((r, idx) =>
+                idx === i ? { ...r, output: errorMsg || result?.error || 'Failed', status: 'error' as const } : r
+              ))
             }
           }
         } catch {
           if (attempts >= maxAttempts) {
             failCount++
-            setSpreadsheetData(prev => {
-              const updated = prev.map(r => [...r])
-              if (updated[i]) {
-                updated[i][outputColIdx] = 'Network error'
-                updated[i][statusColIdx] = 'error'
-              }
-              return updated
-            })
+            setResults(prev => prev.map((r, idx) =>
+              idx === i ? { ...r, output: 'Network error', status: 'error' as const } : r
+            ))
           }
         }
       }
 
       setProcessingState(prev => ({
         ...prev,
-        currentRow: i - start + 2,
+        currentLine: i + 1,
         successCount,
         failCount,
         retryCount: retryTotal,
@@ -521,43 +530,44 @@ function ProcessingScreen({
     const logEntry: ActivityEntry = {
       id: String(Date.now()),
       timestamp: new Date().toLocaleString(),
-      rows: totalRows,
+      lines: totalLines,
       success: successCount,
       failed: failCount,
       instruction: instruction.slice(0, 80),
     }
     setActivityLog(prev => [logEntry, ...prev])
+    setLastRun({
+      lines: totalLines,
+      success: successCount,
+      failed: failCount,
+      timestamp: new Date().toLocaleString(),
+    })
 
     if (failCount === 0) {
-      setStatusMessage(`All ${totalRows} rows processed successfully!`)
+      setStatusMessage(`All ${totalLines} lines processed successfully!`)
       setStatusType('success')
     } else {
       setStatusMessage(`Completed: ${successCount} succeeded, ${failCount} failed.`)
       setStatusType('error')
     }
     setActiveAgentId(null)
-  }, [fromRow, toRow, instruction, outputColumn, spreadsheetData, setSpreadsheetData, setProcessingState, setActivityLog, setActiveAgentId])
+  }, [instruction, parsedLines, setProcessingState, setActivityLog, setActiveAgentId, setLastRun])
 
   const handleRetryFailed = useCallback(async () => {
-    const failedRows: number[] = []
-    spreadsheetData.forEach((row, idx) => {
-      if (row[MOCK_COLUMNS.indexOf('Status')] === 'error') {
-        failedRows.push(idx)
-      }
+    const failedIndices: number[] = []
+    results.forEach((r, idx) => {
+      if (r.status === 'error') failedIndices.push(idx)
     })
-    if (failedRows.length === 0) {
-      setStatusMessage('No failed rows to retry.')
+    if (failedIndices.length === 0) {
+      setStatusMessage('No failed lines to retry.')
       setStatusType('info')
       return
     }
 
-    const outputColIdx = MOCK_COLUMNS.indexOf(outputColumn)
-    const statusColIdx = MOCK_COLUMNS.indexOf('Status')
-
     setProcessingState({
       isRunning: true,
-      currentRow: 0,
-      totalRows: failedRows.length,
+      currentLine: 0,
+      totalLines: failedIndices.length,
       successCount: 0,
       failCount: 0,
       retryCount: 0,
@@ -569,13 +579,16 @@ function ProcessingScreen({
     let successCount = 0
     let failCount = 0
 
-    for (let fi = 0; fi < failedRows.length; fi++) {
-      const i = failedRows[fi]
-      const row = spreadsheetData[i]
-      if (!row) continue
+    for (let fi = 0; fi < failedIndices.length; fi++) {
+      const i = failedIndices[fi]
+      const lineText = results[i]?.input
+      if (!lineText) continue
 
-      const rowDataFormatted = MOCK_COLUMNS.map((col, idx) => `${col}: ${row[idx] ?? ''}`).join('\n')
-      const message = `Instruction: ${instruction}\n\nRow Data:\n${rowDataFormatted}`
+      setResults(prev => prev.map((r, idx) =>
+        idx === i ? { ...r, status: 'processing' as const } : r
+      ))
+
+      const message = `Instruction: ${instruction}\n\nText to process:\n${lineText}`
 
       try {
         setActiveAgentId(ROW_AGENT_ID)
@@ -586,24 +599,25 @@ function ProcessingScreen({
 
         if (result?.success && agentStatus !== 'error') {
           successCount++
-          setSpreadsheetData(prev => {
-            const updated = prev.map(r => [...r])
-            if (updated[i]) {
-              updated[i][outputColIdx] = outputText || 'Processed'
-              updated[i][statusColIdx] = 'success'
-            }
-            return updated
-          })
+          setResults(prev => prev.map((r, idx) =>
+            idx === i ? { ...r, output: outputText || 'Processed', status: 'success' as const } : r
+          ))
         } else {
           failCount++
+          setResults(prev => prev.map((r, idx) =>
+            idx === i ? { ...r, status: 'error' as const } : r
+          ))
         }
       } catch {
         failCount++
+        setResults(prev => prev.map((r, idx) =>
+          idx === i ? { ...r, status: 'error' as const } : r
+        ))
       }
 
       setProcessingState(prev => ({
         ...prev,
-        currentRow: fi + 1,
+        currentLine: fi + 1,
         successCount,
         failCount,
       }))
@@ -620,224 +634,301 @@ function ProcessingScreen({
     setStatusMessage(failCount === 0 ? 'All retries succeeded!' : `Retry: ${successCount} ok, ${failCount} still failing.`)
     setStatusType(failCount === 0 ? 'success' : 'error')
     setActiveAgentId(null)
-  }, [spreadsheetData, instruction, outputColumn, setSpreadsheetData, setProcessingState, setActiveAgentId])
+  }, [results, instruction, setProcessingState, setActiveAgentId])
 
-  const progressPercent = processingState.totalRows > 0
-    ? Math.round((processingState.currentRow / processingState.totalRows) * 100)
+  const handleClearResults = useCallback(() => {
+    setResults([])
+    setProcessingState({
+      isRunning: false,
+      currentLine: 0,
+      totalLines: 0,
+      successCount: 0,
+      failCount: 0,
+      retryCount: 0,
+      completed: false,
+    })
+    setStatusMessage('')
+    setStatusType('')
+  }, [setProcessingState])
+
+  const handleCopyOutput = useCallback(async (text: string, idx: number) => {
+    await copyToClipboard(text)
+    setCopiedIdx(idx)
+    setTimeout(() => setCopiedIdx(null), 1500)
+  }, [])
+
+  const handleCopyAllOutputs = useCallback(async () => {
+    const allOutputs = results
+      .filter(r => r.status === 'success')
+      .map(r => r.output)
+      .join('\n')
+    await copyToClipboard(allOutputs)
+    setCopiedIdx(-1)
+    setTimeout(() => setCopiedIdx(null), 1500)
+  }, [results])
+
+  const progressPercent = processingState.totalLines > 0
+    ? Math.round((processingState.currentLine / processingState.totalLines) * 100)
     : 0
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Processing</h2>
-        <p className="text-sm text-muted-foreground mt-1">Select rows, write instructions, and run batch AI processing</p>
+        <p className="text-sm text-muted-foreground mt-1">Enter text (one item per line), write an instruction, and run batch AI processing</p>
       </div>
-
-      {/* Configuration Row */}
-      <Card className="bg-card border-border shadow-xl shadow-primary/5">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">From Row</Label>
-              <Input
-                type="number"
-                min={1}
-                max={spreadsheetData.length}
-                value={fromRow}
-                onChange={(e) => setFromRow(e.target.value)}
-                className="bg-secondary border-border"
-                disabled={processingState.isRunning}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">To Row</Label>
-              <Input
-                type="number"
-                min={1}
-                max={spreadsheetData.length}
-                value={toRow}
-                onChange={(e) => setToRow(e.target.value)}
-                className="bg-secondary border-border"
-                disabled={processingState.isRunning}
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label className="text-xs text-muted-foreground">Output Column</Label>
-              <Select value={outputColumn} onValueChange={setOutputColumn} disabled={processingState.isRunning}>
-                <SelectTrigger className="bg-secondary border-border">
-                  <SelectValue placeholder="Select column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {MOCK_COLUMNS.map(col => (
-                    <SelectItem key={col} value={col}>{col}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Instruction */}
       <Card className="bg-card border-border shadow-xl shadow-primary/5">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <FiFileText className="w-4 h-4 text-primary" />
+              <FiZap className="w-4 h-4 text-primary" />
               <CardTitle className="text-base">Processing Instruction</CardTitle>
             </div>
             <span className={`text-xs ${instruction.length > 500 ? 'text-red-400' : 'text-muted-foreground'}`}>
               {instruction.length}/500
             </span>
           </div>
+          <CardDescription className="text-muted-foreground text-xs">
+            This instruction will be applied to each line independently
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Textarea
-            placeholder="e.g., Classify the customer feedback sentiment as positive, negative, or neutral..."
+            placeholder="e.g., Classify the sentiment as positive, negative, or neutral..."
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
-            rows={3}
+            rows={2}
             className="bg-secondary border-border resize-none"
             disabled={processingState.isRunning}
           />
         </CardContent>
       </Card>
 
-      {/* Data Preview Table */}
+      {/* Text Input */}
       <Card className="bg-card border-border shadow-xl shadow-primary/5">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <FiTable className="w-4 h-4 text-primary" />
-            <CardTitle className="text-base">Data Preview</CardTitle>
-            <Badge variant="secondary" className="text-xs">{spreadsheetData.length} rows</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ScrollArea className="h-72">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-secondary/50">
-                    {MOCK_COLUMNS.map(col => (
-                      <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {spreadsheetData.map((row, rowIdx) => (
-                    <tr key={rowIdx} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
-                      {row.map((cell, colIdx) => {
-                        const isStatus = MOCK_COLUMNS[colIdx] === 'Status'
-                        return (
-                          <td key={colIdx} className="px-4 py-2.5 whitespace-nowrap text-sm">
-                            {isStatus && cell === 'success' ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(135, 94%, 60%, 0.15)', color: 'hsl(135, 94%, 60%)' }}>
-                                <FiCheck className="w-3 h-3" /> OK
-                              </span>
-                            ) : isStatus && cell === 'error' ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(0, 100%, 62%, 0.15)', color: 'hsl(0, 100%, 62%)' }}>
-                                <FiX className="w-3 h-3" /> Fail
-                              </span>
-                            ) : isStatus && cell === 'retrying' ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(326, 100%, 68%, 0.15)', color: 'hsl(326, 100%, 68%)' }}>
-                                <FiRefreshCw className="w-3 h-3 animate-spin" /> Retry
-                              </span>
-                            ) : (
-                              <span className="text-foreground">{cell || <span className="text-muted-foreground/50">--</span>}</span>
-                            )}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FiList className="w-4 h-4 text-primary" />
+              <CardTitle className="text-base">Input Text</CardTitle>
             </div>
-          </ScrollArea>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="text-xs">
+                {parsedLines.length} {parsedLines.length === 1 ? 'line' : 'lines'} detected
+              </Badge>
+              {inputText.length > 0 && !processingState.isRunning && (
+                <button
+                  onClick={() => setInputText('')}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                >
+                  <FiTrash2 className="w-3 h-3" /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <CardDescription className="text-muted-foreground text-xs">
+            Paste or type your text below. Each line is treated as a separate item to process.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            placeholder={"Great product, fast shipping\nItem arrived damaged, poor packaging\nAverage quality, nothing special\nExcellent customer service\nProduct does not match description"}
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            rows={8}
+            className="bg-secondary border-border font-mono text-sm leading-relaxed"
+            disabled={processingState.isRunning}
+          />
         </CardContent>
       </Card>
 
-      {/* Action Buttons & Progress */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3 flex-wrap">
+      {/* Action Buttons */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          onClick={handleRunProcessing}
+          disabled={processingState.isRunning || !instruction.trim() || parsedLines.length === 0}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all duration-200"
+        >
+          {processingState.isRunning ? (
+            <>
+              <FiLoader className="w-4 h-4 mr-2 animate-spin" />
+              Processing line {processingState.currentLine} of {processingState.totalLines}...
+            </>
+          ) : (
+            <>
+              <FiPlay className="w-4 h-4 mr-2" />
+              Run Processing ({parsedLines.length} {parsedLines.length === 1 ? 'line' : 'lines'})
+            </>
+          )}
+        </Button>
+
+        {processingState.completed && processingState.failCount > 0 && (
           <Button
-            onClick={handleRunProcessing}
-            disabled={processingState.isRunning || !instruction.trim()}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all duration-200"
+            onClick={handleRetryFailed}
+            disabled={processingState.isRunning}
+            variant="outline"
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
           >
-            {processingState.isRunning ? (
-              <>
-                <FiLoader className="w-4 h-4 mr-2 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <FiPlay className="w-4 h-4 mr-2" />
-                Run Processing
-              </>
-            )}
+            <FiRefreshCw className="w-4 h-4 mr-2" />
+            Retry Failed ({processingState.failCount})
           </Button>
-
-          {processingState.completed && processingState.failCount > 0 && (
-            <Button
-              onClick={handleRetryFailed}
-              disabled={processingState.isRunning}
-              variant="outline"
-              className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-            >
-              <FiRefreshCw className="w-4 h-4 mr-2" />
-              Retry Failed ({processingState.failCount})
-            </Button>
-          )}
-
-          {processingState.isRunning && (
-            <Button
-              onClick={() => { abortRef.current = true }}
-              variant="outline"
-              className="border-destructive/30 text-destructive hover:bg-destructive/10"
-            >
-              <FiX className="w-4 h-4 mr-2" />
-              Stop
-            </Button>
-          )}
-        </div>
-
-        {/* Progress Panel */}
-        {(processingState.isRunning || processingState.completed) && (
-          <Card className="bg-card border-border shadow-xl shadow-primary/5">
-            <CardContent className="pt-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground">
-                  {processingState.isRunning ? `Processing row ${processingState.currentRow} of ${processingState.totalRows}` : 'Processing complete'}
-                </span>
-                <span className="text-sm font-bold text-primary">{progressPercent}%</span>
-              </div>
-              <Progress value={progressPercent} className="h-2" />
-              <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1" style={{ color: 'hsl(135, 94%, 60%)' }}>
-                  <FiCheck className="w-3 h-3" /> {processingState.successCount} success
-                </span>
-                <span className="flex items-center gap-1" style={{ color: 'hsl(0, 100%, 62%)' }}>
-                  <FiX className="w-3 h-3" /> {processingState.failCount} failed
-                </span>
-                {processingState.retryCount > 0 && (
-                  <span className="flex items-center gap-1" style={{ color: 'hsl(326, 100%, 68%)' }}>
-                    <FiRefreshCw className="w-3 h-3" /> {processingState.retryCount} retries
-                  </span>
-                )}
-              </div>
-            </CardContent>
-          </Card>
         )}
 
-        {/* Status Message */}
-        {statusMessage && (
-          <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm ${statusType === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : statusType === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
-            {statusType === 'success' ? <FiCheck className="w-4 h-4 flex-shrink-0" /> : statusType === 'error' ? <FiAlertTriangle className="w-4 h-4 flex-shrink-0" /> : <FiActivity className="w-4 h-4 flex-shrink-0" />}
-            {statusMessage}
-          </div>
+        {processingState.isRunning && (
+          <Button
+            onClick={() => { abortRef.current = true }}
+            variant="outline"
+            className="border-destructive/30 text-destructive hover:bg-destructive/10"
+          >
+            <FiX className="w-4 h-4 mr-2" />
+            Stop
+          </Button>
+        )}
+
+        {results.length > 0 && !processingState.isRunning && (
+          <Button
+            onClick={handleClearResults}
+            variant="outline"
+            className="border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+          >
+            <FiTrash2 className="w-4 h-4 mr-2" />
+            Clear Results
+          </Button>
         )}
       </div>
+
+      {/* Progress Panel */}
+      {(processingState.isRunning || processingState.completed) && (
+        <Card className="bg-card border-border shadow-xl shadow-primary/5">
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-foreground">
+                {processingState.isRunning ? `Processing line ${processingState.currentLine} of ${processingState.totalLines}` : 'Processing complete'}
+              </span>
+              <span className="text-sm font-bold text-primary">{progressPercent}%</span>
+            </div>
+            <Progress value={progressPercent} className="h-2" />
+            <div className="flex items-center gap-4 text-xs">
+              <span className="flex items-center gap-1" style={{ color: 'hsl(135, 94%, 60%)' }}>
+                <FiCheck className="w-3 h-3" /> {processingState.successCount} success
+              </span>
+              <span className="flex items-center gap-1" style={{ color: 'hsl(0, 100%, 62%)' }}>
+                <FiX className="w-3 h-3" /> {processingState.failCount} failed
+              </span>
+              {processingState.retryCount > 0 && (
+                <span className="flex items-center gap-1" style={{ color: 'hsl(326, 100%, 68%)' }}>
+                  <FiRefreshCw className="w-3 h-3" /> {processingState.retryCount} retries
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Results Table */}
+      {results.length > 0 && (
+        <Card className="bg-card border-border shadow-xl shadow-primary/5">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FiTable className="w-4 h-4 text-primary" />
+                <CardTitle className="text-base">Results</CardTitle>
+                <Badge variant="secondary" className="text-xs">{results.length} lines</Badge>
+              </div>
+              {results.some(r => r.status === 'success') && (
+                <Button
+                  onClick={handleCopyAllOutputs}
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-foreground gap-1.5"
+                >
+                  {copiedIdx === -1 ? <FiCheck className="w-3 h-3" /> : <FiCopy className="w-3 h-3" />}
+                  {copiedIdx === -1 ? 'Copied!' : 'Copy All Outputs'}
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ScrollArea className="max-h-[28rem]">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/50">
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider w-16">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Input</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Output</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider w-24">Status</th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
+                        <td className="px-4 py-3 text-sm text-muted-foreground font-mono">{row.lineNumber}</td>
+                        <td className="px-4 py-3 text-sm text-foreground max-w-[250px]">
+                          <div className="truncate" title={row.input}>{row.input}</div>
+                        </td>
+                        <td className="px-4 py-3 text-sm max-w-[350px]">
+                          {row.status === 'processing' ? (
+                            <span className="flex items-center gap-2 text-muted-foreground">
+                              <FiLoader className="w-3 h-3 animate-spin text-primary" />
+                              Processing...
+                            </span>
+                          ) : row.status === 'pending' ? (
+                            <span className="text-muted-foreground/60">Waiting...</span>
+                          ) : (
+                            <div className={`${row.status === 'error' ? 'text-red-400' : 'text-foreground'}`} title={row.output}>
+                              {row.output}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {row.status === 'success' ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(135, 94%, 60%, 0.15)', color: 'hsl(135, 94%, 60%)' }}>
+                              <FiCheck className="w-3 h-3" /> OK
+                            </span>
+                          ) : row.status === 'error' ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(0, 100%, 62%, 0.15)', color: 'hsl(0, 100%, 62%)' }}>
+                              <FiX className="w-3 h-3" /> Fail
+                            </span>
+                          ) : row.status === 'processing' ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'hsla(265, 89%, 72%, 0.15)', color: 'hsl(265, 89%, 72%)' }}>
+                              <FiLoader className="w-3 h-3 animate-spin" /> ...
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/50">--</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {row.status === 'success' && (
+                            <button
+                              onClick={() => handleCopyOutput(row.output, rowIdx)}
+                              className="text-muted-foreground hover:text-foreground transition-colors"
+                              title="Copy output"
+                            >
+                              {copiedIdx === rowIdx ? <FiCheck className="w-3.5 h-3.5" style={{ color: 'hsl(135, 94%, 60%)' }} /> : <FiCopy className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Status Message */}
+      {statusMessage && (
+        <div className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm ${statusType === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : statusType === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}`}>
+          {statusType === 'success' ? <FiCheck className="w-4 h-4 flex-shrink-0" /> : statusType === 'error' ? <FiAlertTriangle className="w-4 h-4 flex-shrink-0" /> : <FiActivity className="w-4 h-4 flex-shrink-0" />}
+          {statusMessage}
+        </div>
+      )}
     </div>
   )
 }
@@ -1062,7 +1153,7 @@ function SettingsScreen({
             </Button>
           </div>
           <CardDescription className="text-muted-foreground text-xs">
-            Get help configuring your spreadsheet assistant
+            Get help configuring your text processing assistant
           </CardDescription>
         </CardHeader>
 
@@ -1072,7 +1163,7 @@ function SettingsScreen({
               {chatMessages.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
                   <FiHelpCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">Ask me anything about setting up your spreadsheet assistant</p>
+                  <p className="text-sm">Ask me anything about setting up your text processing assistant</p>
                 </div>
               )}
               {chatMessages.map((msg, idx) => (
@@ -1139,7 +1230,7 @@ function SettingsScreen({
 // --- Agent Status Panel ---
 function AgentStatusPanel({ activeAgentId }: { activeAgentId: string | null }) {
   const agents = [
-    { id: ROW_AGENT_ID, name: 'Row Processing Agent', purpose: 'Processes individual rows with AI instructions' },
+    { id: ROW_AGENT_ID, name: 'Row Processing Agent', purpose: 'Processes each line of text with AI instructions' },
     { id: ADVISOR_AGENT_ID, name: 'Setup Advisor Agent', purpose: 'Provides configuration help and guidance' },
   ]
 
@@ -1176,19 +1267,17 @@ function AgentStatusPanel({ activeAgentId }: { activeAgentId: string | null }) {
 export default function Page() {
   const [activeScreen, setActiveScreen] = useState<string>('dashboard')
   const [showSample, setShowSample] = useState(false)
-  const [spreadsheetData, setSpreadsheetData] = useState<string[][]>(() =>
-    INITIAL_MOCK_DATA.map(r => [...r])
-  )
   const [processingState, setProcessingState] = useState<ProcessingState>({
     isRunning: false,
-    currentRow: 0,
-    totalRows: 0,
+    currentLine: 0,
+    totalLines: 0,
     successCount: 0,
     failCount: 0,
     retryCount: 0,
     completed: false,
   })
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([])
+  const [lastRun, setLastRun] = useState<{ lines: number; success: number; failed: number; timestamp: string } | null>(null)
   const [config, setConfig] = useState<ConfigState>({
     apiKey: '',
     endpoint: '',
@@ -1211,44 +1300,6 @@ export default function Page() {
       })
     }
   }, [])
-
-  // Sample data toggle effect
-  useEffect(() => {
-    if (showSample) {
-      const sampleData = INITIAL_MOCK_DATA.map(r => [...r])
-      sampleData[0][5] = 'Positive sentiment - customer is satisfied with product and shipping speed'
-      sampleData[0][6] = 'success'
-      sampleData[1][5] = 'Negative sentiment - customer received damaged item, unhappy with packaging'
-      sampleData[1][6] = 'success'
-      sampleData[2][5] = 'Neutral sentiment - customer found quality average, no strong feelings'
-      sampleData[2][6] = 'success'
-      sampleData[3][5] = 'Positive sentiment - customer praises customer service team'
-      sampleData[3][6] = 'success'
-      sampleData[4][5] = 'Error: rate limit exceeded'
-      sampleData[4][6] = 'error'
-      setSpreadsheetData(sampleData)
-      setProcessingState({
-        isRunning: false,
-        currentRow: 5,
-        totalRows: 5,
-        successCount: 4,
-        failCount: 1,
-        retryCount: 1,
-        completed: true,
-      })
-    } else {
-      setSpreadsheetData(INITIAL_MOCK_DATA.map(r => [...r]))
-      setProcessingState({
-        isRunning: false,
-        currentRow: 0,
-        totalRows: 0,
-        successCount: 0,
-        failCount: 0,
-        retryCount: 0,
-        completed: false,
-      })
-    }
-  }, [showSample])
 
   return (
     <ErrorBoundary>
@@ -1295,14 +1346,13 @@ export default function Page() {
                 <DashboardScreen
                   showSample={showSample}
                   activityLog={activityLog}
+                  lastRun={lastRun}
                   setActiveScreen={setActiveScreen}
                 />
               )}
 
               {activeScreen === 'processing' && (
                 <ProcessingScreen
-                  spreadsheetData={spreadsheetData}
-                  setSpreadsheetData={setSpreadsheetData}
                   processingState={processingState}
                   setProcessingState={setProcessingState}
                   activityLog={activityLog}
@@ -1310,6 +1360,7 @@ export default function Page() {
                   showSample={showSample}
                   activeAgentId={activeAgentId}
                   setActiveAgentId={setActiveAgentId}
+                  setLastRun={setLastRun}
                 />
               )}
 
