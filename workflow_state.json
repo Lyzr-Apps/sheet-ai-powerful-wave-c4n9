@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "row_processing_agent": {
+      "agent_id": "699936cd02de7ae3dd4c1a80",
+      "name": "Row Processing Agent",
+      "workflow_node_id": "row_processing_agent"
+    },
+    "setup_advisor_agent": {
+      "agent_id": "699936cdcfb4f05aa49ea783",
+      "name": "Setup Advisor Agent",
+      "workflow_node_id": "setup_advisor_agent"
+    }
+  },
+  "rag_ids": {},
+  "schedule_ids": {},
+  "schedules": {}
+}

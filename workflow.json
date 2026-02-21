@@ -1,0 +1,90 @@
+{
+  "workflow": {
+    "nodes": [
+      {
+        "id": "input_node",
+        "type": "Input",
+        "label": "User Input",
+        "nodeCategory": "input"
+      },
+      {
+        "id": "row_processing_agent",
+        "type": "Agent",
+        "label": "Row Processing Agent",
+        "nodeCategory": "agent"
+      },
+      {
+        "id": "setup_advisor_agent",
+        "type": "Agent",
+        "label": "Setup Advisor Agent",
+        "nodeCategory": "agent"
+      },
+      {
+        "id": "output_node_1",
+        "type": "Output",
+        "label": "Processing Output",
+        "nodeCategory": "end"
+      },
+      {
+        "id": "output_node_2",
+        "type": "Output",
+        "label": "Advisor Output",
+        "nodeCategory": "end"
+      }
+    ],
+    "edges": [
+      {
+        "source": "input_node",
+        "target": "row_processing_agent"
+      },
+      {
+        "source": "input_node",
+        "target": "setup_advisor_agent"
+      },
+      {
+        "source": "row_processing_agent",
+        "target": "output_node_1"
+      },
+      {
+        "source": "setup_advisor_agent",
+        "target": "output_node_2"
+      }
+    ]
+  },
+  "agents": [
+    {
+      "agent_id": "699936cd02de7ae3dd4c1a80",
+      "name": "Row Processing Agent",
+      "description": "Takes a user instruction and a single row's data, formulates an optimized prompt, and returns the AI-generated output text. Handles prompt engineering, output parsing, and formatting for each row in isolation.",
+      "provider_id": "openai",
+      "model": "gpt-4.1",
+      "temperature": 0.4,
+      "top_p": 1,
+      "image_output_config": null,
+      "voice_config": null,
+      "file_output": false,
+      "response_schema": {
+        "output_text": "string",
+        "status": "string",
+        "error_message": "string"
+      }
+    },
+    {
+      "agent_id": "699936cdcfb4f05aa49ea783",
+      "name": "Setup Advisor Agent",
+      "description": "Answers user questions about configuring their LLM provider -- helps with endpoint URL formats, model name syntax, API key troubleshooting, and common error resolution.",
+      "provider_id": "openai",
+      "model": "gpt-4.1",
+      "temperature": 0.5,
+      "top_p": 0.95,
+      "image_output_config": null,
+      "voice_config": null,
+      "file_output": false,
+      "response_schema": {
+        "advice": "string",
+        "suggested_action": "string",
+        "related_topics": "string"
+      }
+    }
+  ]
+}

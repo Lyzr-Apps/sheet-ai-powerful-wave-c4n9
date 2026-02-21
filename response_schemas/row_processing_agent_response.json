@@ -1,0 +1,18 @@
+{
+  "agent_name": "Row Processing Agent",
+  "agent_id": "699936cd02de7ae3dd4c1a80",
+  "description": "Takes a user instruction and a single row's data, formulates an optimized prompt, and returns the AI-generated output text. Handles prompt engineering, output parsing, and formatting for each row in isolation.",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "output_text": "string",
+    "status": "string",
+    "error_message": "string"
+  },
+  "example_response": {
+    "output_text": "The processed output text for this row",
+    "status": "Processing status: success or error",
+    "error_message": "Error message if processing failed, empty string otherwise"
+  }
+}
