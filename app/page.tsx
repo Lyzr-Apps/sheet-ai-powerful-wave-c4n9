@@ -23,7 +23,6 @@ import {
 import { copyToClipboard } from '@/lib/clipboard'
 
 // --- Constants ---
-const ROW_AGENT_ID = '699936cd02de7ae3dd4c1a80'
 const ADVISOR_AGENT_ID = '699936cdcfb4f05aa49ea783'
 
 const SAMPLE_ACTIVITY_LOG = [
@@ -70,7 +69,37 @@ interface ConfigState {
   apiKey: string
   endpoint: string
   model: string
+  requestType: string
   isConfigured: boolean
+}
+
+// --- 1min.ai API Helper ---
+async function callOneMinAI(
+  apiKey: string,
+  model: string,
+  requestType: string,
+  tone: string,
+  prompt: string,
+): Promise<{ success: boolean; output?: string; error?: string }> {
+  const res = await fetch('/api/onemin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKey,
+      model: model || 'gpt-4o',
+      type: requestType || 'CONTENT_GENERATOR_EMAIL',
+      promptObject: {
+        tone,
+        language: 'English',
+        prompt,
+      },
+    }),
+  })
+  const data = await res.json()
+  if (!res.ok || !data.success) {
+    return { success: false, error: data.error || `API returned status ${res.status}` }
+  }
+  return { success: true, output: data.output || '' }
 }
 
 // --- Markdown Renderer ---
@@ -352,6 +381,7 @@ function ProcessingScreen({
   activeAgentId,
   setActiveAgentId,
   setLastRun,
+  config,
 }: {
   processingState: ProcessingState
   setProcessingState: React.Dispatch<React.SetStateAction<ProcessingState>>
@@ -361,6 +391,7 @@ function ProcessingScreen({
   activeAgentId: string | null
   setActiveAgentId: React.Dispatch<React.SetStateAction<string | null>>
   setLastRun: React.Dispatch<React.SetStateAction<{ lines: number; success: number; failed: number; timestamp: string } | null>>
+  config: ConfigState
 }) {
   const [instruction, setInstruction] = useState('')
   const [inputText, setInputText] = useState('')
@@ -414,6 +445,11 @@ function ProcessingScreen({
   }, [showSample, setProcessingState])
 
   const handleRunProcessing = useCallback(async () => {
+    if (!config.apiKey) {
+      setStatusMessage('API key not configured. Go to Settings to add your 1min.ai API key.')
+      setStatusType('error')
+      return
+    }
     if (!instruction.trim()) {
       setStatusMessage('Please enter a processing instruction.')
       setStatusType('error')
@@ -463,8 +499,6 @@ function ProcessingScreen({
         idx === i ? { ...r, status: 'processing' as const } : r
       ))
 
-      const message = `Instruction: ${instruction}\n\nText to process:\n${lineText}`
-
       let attempts = 0
       let succeeded = false
       const maxAttempts = 3
@@ -478,25 +512,27 @@ function ProcessingScreen({
         attempts++
 
         try {
-          setActiveAgentId(ROW_AGENT_ID)
-          const result = await callAIAgent(message, ROW_AGENT_ID)
+          setActiveAgentId('onemin-processing')
+          const result = await callOneMinAI(
+            config.apiKey,
+            config.model,
+            config.requestType,
+            instruction,
+            lineText,
+          )
           setActiveAgentId(null)
 
-          const outputText = result?.response?.result?.output_text ?? ''
-          const agentStatus = result?.response?.result?.status ?? ''
-          const errorMsg = result?.response?.result?.error_message ?? ''
-
-          if (result?.success && agentStatus !== 'error') {
+          if (result.success) {
             succeeded = true
             successCount++
             setResults(prev => prev.map((r, idx) =>
-              idx === i ? { ...r, output: outputText || 'Processed', status: 'success' as const } : r
+              idx === i ? { ...r, output: result.output || 'Processed', status: 'success' as const } : r
             ))
           } else {
             if (attempts >= maxAttempts) {
               failCount++
               setResults(prev => prev.map((r, idx) =>
-                idx === i ? { ...r, output: errorMsg || result?.error || 'Failed', status: 'error' as const } : r
+                idx === i ? { ...r, output: result.error || 'Failed', status: 'error' as const } : r
               ))
             }
           }
@@ -551,7 +587,7 @@ function ProcessingScreen({
       setStatusType('error')
     }
     setActiveAgentId(null)
-  }, [instruction, parsedLines, setProcessingState, setActivityLog, setActiveAgentId, setLastRun])
+  }, [instruction, parsedLines, config, setProcessingState, setActivityLog, setActiveAgentId, setLastRun])
 
   const handleRetryFailed = useCallback(async () => {
     const failedIndices: number[] = []
@@ -588,24 +624,26 @@ function ProcessingScreen({
         idx === i ? { ...r, status: 'processing' as const } : r
       ))
 
-      const message = `Instruction: ${instruction}\n\nText to process:\n${lineText}`
-
       try {
-        setActiveAgentId(ROW_AGENT_ID)
-        const result = await callAIAgent(message, ROW_AGENT_ID)
+        setActiveAgentId('onemin-processing')
+        const result = await callOneMinAI(
+          config.apiKey,
+          config.model,
+          config.requestType,
+          instruction,
+          lineText,
+        )
         setActiveAgentId(null)
-        const outputText = result?.response?.result?.output_text ?? ''
-        const agentStatus = result?.response?.result?.status ?? ''
 
-        if (result?.success && agentStatus !== 'error') {
+        if (result.success) {
           successCount++
           setResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, output: outputText || 'Processed', status: 'success' as const } : r
+            idx === i ? { ...r, output: result.output || 'Processed', status: 'success' as const } : r
           ))
         } else {
           failCount++
           setResults(prev => prev.map((r, idx) =>
-            idx === i ? { ...r, status: 'error' as const } : r
+            idx === i ? { ...r, output: result.error || 'Failed', status: 'error' as const } : r
           ))
         }
       } catch {
@@ -634,7 +672,7 @@ function ProcessingScreen({
     setStatusMessage(failCount === 0 ? 'All retries succeeded!' : `Retry: ${successCount} ok, ${failCount} still failing.`)
     setStatusType(failCount === 0 ? 'success' : 'error')
     setActiveAgentId(null)
-  }, [results, instruction, setProcessingState, setActiveAgentId])
+  }, [results, instruction, config, setProcessingState, setActiveAgentId])
 
   const handleClearResults = useCallback(() => {
     setResults([])
@@ -678,6 +716,13 @@ function ProcessingScreen({
         <p className="text-sm text-muted-foreground mt-1">Enter text (one item per line), write an instruction, and run batch AI processing</p>
       </div>
 
+      {!config.isConfigured && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <FiAlertTriangle className="w-4 h-4 flex-shrink-0" />
+          API key not configured. Go to Settings to add your 1min.ai API key before processing.
+        </div>
+      )}
+
       {/* Instruction */}
       <Card className="bg-card border-border shadow-xl shadow-primary/5">
         <CardHeader className="pb-3">
@@ -691,7 +736,7 @@ function ProcessingScreen({
             </span>
           </div>
           <CardDescription className="text-muted-foreground text-xs">
-            This instruction will be applied to each line independently
+            Sent as the &quot;tone&quot; parameter to 1min.ai for each line
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -959,14 +1004,16 @@ function SettingsScreen({
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const savedKey = localStorage.getItem('spreadsheet_api_key') ?? ''
-      const savedEndpoint = localStorage.getItem('spreadsheet_endpoint') ?? ''
-      const savedModel = localStorage.getItem('spreadsheet_model') ?? ''
+      const savedKey = localStorage.getItem('onemin_api_key') ?? ''
+      const savedEndpoint = localStorage.getItem('onemin_endpoint') ?? 'https://api.1min.ai/api/features'
+      const savedModel = localStorage.getItem('onemin_model') ?? 'gpt-4o'
+      const savedType = localStorage.getItem('onemin_request_type') ?? 'CONTENT_GENERATOR_EMAIL'
       if (savedKey || savedEndpoint || savedModel) {
         setConfig({
           apiKey: savedKey,
           endpoint: savedEndpoint,
           model: savedModel,
+          requestType: savedType,
           isConfigured: !!savedKey,
         })
       }
@@ -982,9 +1029,10 @@ function SettingsScreen({
   const handleSave = useCallback(() => {
     setSaving(true)
     if (typeof window !== 'undefined') {
-      localStorage.setItem('spreadsheet_api_key', config.apiKey)
-      localStorage.setItem('spreadsheet_endpoint', config.endpoint)
-      localStorage.setItem('spreadsheet_model', config.model)
+      localStorage.setItem('onemin_api_key', config.apiKey)
+      localStorage.setItem('onemin_endpoint', config.endpoint)
+      localStorage.setItem('onemin_model', config.model)
+      localStorage.setItem('onemin_request_type', config.requestType)
     }
     setConfig(prev => ({ ...prev, isConfigured: !!prev.apiKey }))
     setTimeout(() => {
@@ -994,23 +1042,30 @@ function SettingsScreen({
   }, [config, setConfig])
 
   const handleTest = useCallback(async () => {
+    if (!config.apiKey) {
+      setTestStatus({ message: 'Please enter your API key first.', type: 'error' })
+      return
+    }
     setTesting(true)
     setTestStatus({ message: '', type: '' })
     try {
-      setActiveAgentId(ADVISOR_AGENT_ID)
-      const result = await callAIAgent('Test connection: confirm you are available and working.', ADVISOR_AGENT_ID)
-      setActiveAgentId(null)
-      if (result?.success) {
-        setTestStatus({ message: 'Connection test successful! Agent responded.', type: 'success' })
+      const result = await callOneMinAI(
+        config.apiKey,
+        config.model,
+        config.requestType,
+        'professional',
+        'Say hello in one sentence to confirm you are working.',
+      )
+      if (result.success) {
+        setTestStatus({ message: 'Connection test successful! 1min.ai responded.', type: 'success' })
       } else {
-        setTestStatus({ message: result?.error || 'Connection test failed.', type: 'error' })
+        setTestStatus({ message: result.error || 'Connection test failed.', type: 'error' })
       }
     } catch {
       setTestStatus({ message: 'Connection test failed: network error.', type: 'error' })
     }
     setTesting(false)
-    setActiveAgentId(null)
-  }, [setActiveAgentId])
+  }, [config])
 
   const handleChatSend = useCallback(async () => {
     const msg = chatInput.trim()
@@ -1059,9 +1114,9 @@ function SettingsScreen({
         <CardHeader>
           <div className="flex items-center gap-2">
             <FiSettings className="w-4 h-4 text-primary" />
-            <CardTitle className="text-base">LLM Provider Configuration</CardTitle>
+            <CardTitle className="text-base">1min.ai Configuration</CardTitle>
           </div>
-          <CardDescription className="text-muted-foreground text-xs">Stored locally in your browser</CardDescription>
+          <CardDescription className="text-muted-foreground text-xs">Your credentials are stored locally in your browser</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
@@ -1070,7 +1125,7 @@ function SettingsScreen({
               <Input
                 id="api-key"
                 type={showPassword ? 'text' : 'password'}
-                placeholder="sk-..."
+                placeholder="Your 1min.ai API key"
                 value={config.apiKey}
                 onChange={(e) => setConfig(prev => ({ ...prev, apiKey: e.target.value }))}
                 className="bg-secondary border-border pr-10"
@@ -1090,24 +1145,39 @@ function SettingsScreen({
             <Input
               id="endpoint"
               type="text"
-              placeholder="https://api.provider.com/v1/chat/completions"
+              placeholder="https://api.1min.ai/api/features"
               value={config.endpoint}
               onChange={(e) => setConfig(prev => ({ ...prev, endpoint: e.target.value }))}
               className="bg-secondary border-border"
             />
+            <p className="text-xs text-muted-foreground">Default: https://api.1min.ai/api/features</p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="model" className="text-sm font-medium">Model Name</Label>
-            <Input
-              id="model"
-              type="text"
-              placeholder="gpt-4"
-              value={config.model}
-              onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
-              className="bg-secondary border-border"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="model" className="text-sm font-medium">Model</Label>
+              <Input
+                id="model"
+                type="text"
+                placeholder="gpt-4o"
+                value={config.model}
+                onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
+                className="bg-secondary border-border"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="request-type" className="text-sm font-medium">Request Type</Label>
+              <Input
+                id="request-type"
+                type="text"
+                placeholder="CONTENT_GENERATOR_EMAIL"
+                value={config.requestType}
+                onChange={(e) => setConfig(prev => ({ ...prev, requestType: e.target.value }))}
+                className="bg-secondary border-border"
+              />
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground -mt-2">The processing instruction maps to &quot;tone&quot; and each input line maps to &quot;prompt&quot; in the 1min.ai promptObject.</p>
 
           <Separator className="bg-border" />
 
@@ -1230,7 +1300,7 @@ function SettingsScreen({
 // --- Agent Status Panel ---
 function AgentStatusPanel({ activeAgentId }: { activeAgentId: string | null }) {
   const agents = [
-    { id: ROW_AGENT_ID, name: 'Row Processing Agent', purpose: 'Processes each line of text with AI instructions' },
+    { id: 'onemin-processing', name: '1min.ai Text Processor', purpose: 'Processes each line via 1min.ai API' },
     { id: ADVISOR_AGENT_ID, name: 'Setup Advisor Agent', purpose: 'Provides configuration help and guidance' },
   ]
 
@@ -1280,8 +1350,9 @@ export default function Page() {
   const [lastRun, setLastRun] = useState<{ lines: number; success: number; failed: number; timestamp: string } | null>(null)
   const [config, setConfig] = useState<ConfigState>({
     apiKey: '',
-    endpoint: '',
-    model: '',
+    endpoint: 'https://api.1min.ai/api/features',
+    model: 'gpt-4o',
+    requestType: 'CONTENT_GENERATOR_EMAIL',
     isConfigured: false,
   })
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null)
@@ -1289,13 +1360,15 @@ export default function Page() {
   // Load config from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const savedKey = localStorage.getItem('spreadsheet_api_key') ?? ''
-      const savedEndpoint = localStorage.getItem('spreadsheet_endpoint') ?? ''
-      const savedModel = localStorage.getItem('spreadsheet_model') ?? ''
+      const savedKey = localStorage.getItem('onemin_api_key') ?? ''
+      const savedEndpoint = localStorage.getItem('onemin_endpoint') ?? 'https://api.1min.ai/api/features'
+      const savedModel = localStorage.getItem('onemin_model') ?? 'gpt-4o'
+      const savedType = localStorage.getItem('onemin_request_type') ?? 'CONTENT_GENERATOR_EMAIL'
       setConfig({
         apiKey: savedKey,
         endpoint: savedEndpoint,
         model: savedModel,
+        requestType: savedType,
         isConfigured: !!savedKey,
       })
     }
@@ -1361,6 +1434,7 @@ export default function Page() {
                   activeAgentId={activeAgentId}
                   setActiveAgentId={setActiveAgentId}
                   setLastRun={setLastRun}
+                  config={config}
                 />
               )}
 
